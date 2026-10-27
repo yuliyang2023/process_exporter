@@ -115,7 +115,7 @@ process_start_time_seconds{path="/opt/homebrew/Cellar/traefik/3.3.4/bin/traefik"
 To build it, you need XCode build tools
 
 ```bash
-swiftc process_exporter/main.swift
+swiftc process_exporter/*.swift
 ```
 
 ## ps
@@ -396,3 +396,11 @@ RunLoop.current.run()
 Technically this process exporter is an final result of all that experiments
 
 At least is solves my goal - collect metrics for local processess running on MacOS
+
+## CPU and per-process network metrics
+
+The Intel workflow targets macOS 13 and later. `process_exporter_cpu_logical_count` and `process_exporter_cpu_physical_count` report host CPU core counts.
+
+The exporter samples `/usr/bin/nettop` every 10 seconds on a background queue and exposes `process_network_receive_bytes_total` and `process_network_transmit_bytes_total` with the same PID and executable path labels as the CPU and memory metrics. Use `rate(...[1m])` to display bytes per second. These are macOS process traffic counters, not available link capacity; VPN/proxy traffic and shared networking services can be attributed to their owning processes. Processes without network records have no network series.
+
+`process_network_collector_success` reports sample health; `process_network_collector_last_success_timestamp_seconds` allows detecting stale data. Network collection does not block HTTP scrapes and each sample has a five-second timeout.

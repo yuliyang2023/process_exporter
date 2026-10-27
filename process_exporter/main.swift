@@ -83,6 +83,23 @@ func getProcesses() -> [ProcessInfo] {
 
 func getPrometheusMetrics() -> String {
     var metrics = [String]()
+    let (network, networkOK, networkUpdated) = networkCollector.snapshot()
+    metrics.append("# HELP process_exporter_cpu_logical_count Number of logical CPU cores")
+    metrics.append("# TYPE process_exporter_cpu_logical_count gauge")
+    metrics.append("process_exporter_cpu_logical_count \(cpuCount("hw.logicalcpu"))")
+    metrics.append("# HELP process_exporter_cpu_physical_count Number of physical CPU cores")
+    metrics.append("# TYPE process_exporter_cpu_physical_count gauge")
+    metrics.append("process_exporter_cpu_physical_count \(cpuCount("hw.physicalcpu"))")
+    metrics.append("# HELP process_network_collector_success Whether the latest nettop sample succeeded")
+    metrics.append("# TYPE process_network_collector_success gauge")
+    metrics.append("process_network_collector_success \(networkOK ? 1 : 0)")
+    metrics.append("# HELP process_network_collector_last_success_timestamp_seconds Last successful nettop sample timestamp")
+    metrics.append("# TYPE process_network_collector_last_success_timestamp_seconds gauge")
+    metrics.append("process_network_collector_last_success_timestamp_seconds \(networkUpdated)")
+    metrics.append("# HELP process_network_receive_bytes_total Per-process received bytes reported by macOS nettop")
+    metrics.append("# TYPE process_network_receive_bytes_total counter")
+    metrics.append("# HELP process_network_transmit_bytes_total Per-process transmitted bytes reported by macOS nettop")
+    metrics.append("# TYPE process_network_transmit_bytes_total counter")
     
     // Add metric descriptions (HELP and TYPE)
     metrics.append("# HELP process_start_time_seconds Start time of the process since unix epoch in seconds")
@@ -96,7 +113,7 @@ func getPrometheusMetrics() -> String {
     
     // Collect metrics for each process
     for info in getProcesses() {
-        let labels = "pid=\"\(info.pid)\",ppid=\"\(info.pbi_ppid)\",uid=\"\(info.pbi_uid)\",gid=\"\(info.pbi_gid)\",path=\"\(info.path)\""
+        let labels = "pid=\"\(info.pid)\",ppid=\"\(info.pbi_ppid)\",uid=\"\(info.pbi_uid)\",gid=\"\(info.pbi_gid)\",path=\"\(escapeLabel(info.path))\""
         
         // Start time
         metrics.append("process_start_time_seconds{\(labels)} \(info.pbi_start_tvsec)")
@@ -107,12 +124,17 @@ func getPrometheusMetrics() -> String {
         
         // Memory
         metrics.append("process_resident_memory_bytes{\(labels)} \(info.pti_resident_size)")
+        if let bytes = network[info.pid] {
+            metrics.append("process_network_receive_bytes_total{\(labels)} \(bytes.received)")
+            metrics.append("process_network_transmit_bytes_total{\(labels)} \(bytes.transmitted)")
+        }
     }
     
     return metrics.joined(separator: "\n")
 }
 
 // https://ko9.org/posts/simple-swift-web-server/
+networkCollector.start()
 let listener = try! NWListener(using: .tcp, on: 9256)
 listener.newConnectionHandler = { connection in
     connection.start(queue: .main)

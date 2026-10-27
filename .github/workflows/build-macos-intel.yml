@@ -20,7 +20,7 @@ jobs:
         run: |
           mkdir -p dist
           xcrun swiftc -O -target x86_64-apple-macosx13.0 \
-            process_exporter/main.swift -o dist/process_exporter
+            process_exporter/*.swift -o dist/process_exporter
           file dist/process_exporter
           test "$(lipo -archs dist/process_exporter)" = x86_64
           otool -l dist/process_exporter | grep -A 5 LC_BUILD_VERSION
@@ -36,6 +36,21 @@ jobs:
           grep '^process_cpu_seconds_total{' "$RUNNER_TEMP/metrics.txt" > /dev/null
           grep '^process_resident_memory_bytes{' "$RUNNER_TEMP/metrics.txt" > /dev/null
           grep '^process_start_time_seconds{' "$RUNNER_TEMP/metrics.txt" > /dev/null
+          # The network sample is asynchronous and must produce real process counters.
+          python3 - <<'PY'
+          import time, urllib.request
+          for attempt in range(30):
+              with urllib.request.urlopen("http://127.0.0.1:9256/metrics", timeout=10) as response:
+                  body = response.read().decode()
+              if "process_network_collector_success 1\n" in body:
+                  assert "process_network_receive_bytes_total{" in body
+                  assert "process_network_transmit_bytes_total{" in body
+                  assert "process_exporter_cpu_logical_count 0\n" not in body
+                  break
+              time.sleep(1)
+          else:
+              raise AssertionError("nettop did not produce a successful sample")
+          PY
           # Exceed launchd's default 256-descriptor limit to catch socket leaks.
           python3 - <<'PY'
           import urllib.request
