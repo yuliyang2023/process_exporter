@@ -35,6 +35,15 @@ jobs:
           grep '^process_cpu_seconds_total{' "$RUNNER_TEMP/metrics.txt" > /dev/null
           grep '^process_resident_memory_bytes{' "$RUNNER_TEMP/metrics.txt" > /dev/null
           grep '^process_start_time_seconds{' "$RUNNER_TEMP/metrics.txt" > /dev/null
+          # Exceed launchd's default 256-descriptor limit to catch socket leaks.
+          python3 - <<'PY'
+          import urllib.request
+          for attempt in range(600):
+              with urllib.request.urlopen("http://127.0.0.1:9256/metrics", timeout=10) as response:
+                  body = response.read()
+                  assert b"process_resident_memory_bytes{" in body, attempt
+          print("600 complete metrics requests succeeded")
+          PY
       - name: Package binary and checksum
         run: |
           cp README.md dist/README.md

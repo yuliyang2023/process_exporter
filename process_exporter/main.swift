@@ -130,7 +130,11 @@ listener.newConnectionHandler = { connection in
                     + "Connection: close\r\n\r\n"
                 connection.send(content: (headers + metrics).data(using: .utf8),
                                 contentContext: .finalMessage, isComplete: true,
-                                completion: .contentProcessed { _ in })
+                                completion: .contentProcessed { _ in
+                                    // A final message closes the write side, but does
+                                    // not release NWConnection's socket descriptor.
+                                    connection.cancel()
+                                })
             } else if complete || error != nil || request.count >= 65536 {
                 connection.cancel()
             } else {
