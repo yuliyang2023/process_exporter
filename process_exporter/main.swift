@@ -115,27 +115,30 @@ func getPrometheusMetrics() -> String {
 // https://ko9.org/posts/simple-swift-web-server/
 let listener = try! NWListener(using: .tcp, on: 9256)
 listener.newConnectionHandler = { connection in
-    connection.stateUpdateHandler = { print("connection.state = \($0)") }
     connection.start(queue: .main)
-    
-    let metrics = getPrometheusMetrics()
-    let response = """
-        HTTP/1.1 200 OK\r
-        Content-Length: \(metrics.utf8.count)\r
-        Content-Type: text/plain\r
-        Connection: close\r
-        \r
-        \(metrics)
-        """
-    connection.send(content: response.data(using: .utf8), isComplete: true, completion: .contentProcessed({ error in
-        if error != nil {
-            print("error = \(error!)")
+    // Read the HTTP request before sending the response. Cancelling a connection
+    // with unread request bytes can reset it and truncate a large metrics body.
+    func receiveRequest(_ buffered: Data) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { data, _, complete, error in
+            var request = buffered
+            if let data = data { request.append(data) }
+            if request.range(of: Data([13, 10, 13, 10])) != nil {
+                let metrics = getPrometheusMetrics() + "\n"
+                let headers = "HTTP/1.1 200 OK\r\n"
+                    + "Content-Length: \(metrics.utf8.count)\r\n"
+                    + "Content-Type: text/plain; version=0.0.4; charset=utf-8\r\n"
+                    + "Connection: close\r\n\r\n"
+                connection.send(content: (headers + metrics).data(using: .utf8),
+                                contentContext: .finalMessage, isComplete: true,
+                                completion: .contentProcessed { _ in })
+            } else if complete || error != nil || request.count >= 65536 {
+                connection.cancel()
+            } else {
+                receiveRequest(request)
+            }
         }
-        // connection.cancel()
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 1) { _, _, _, _ in
-            connection.cancel()
-        }
-    }))
+    }
+    receiveRequest(Data())
 }
 
 print("open http://localhost:9256/metrics")
