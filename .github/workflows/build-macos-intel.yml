@@ -26,6 +26,7 @@ jobs:
           otool -l dist/process_exporter | grep -A 5 LC_BUILD_VERSION
       - name: Verify HTTP metrics
         run: |
+          ulimit -n 256
           ./dist/process_exporter > "$RUNNER_TEMP/process-exporter.log" 2>&1 &
           exporter_pid=$!
           trap 'kill "$exporter_pid" 2>/dev/null || true' EXIT
