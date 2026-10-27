@@ -1,0 +1,52 @@
+name: Build macOS Intel binary
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - process_exporter/**
+      - .github/workflows/build-macos-intel.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15-intel
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile for Intel Macs running macOS 13 or later
+        run: |
+          mkdir -p dist
+          xcrun swiftc -O -target x86_64-apple-macosx13.0 \
+            process_exporter/main.swift -o dist/process_exporter
+          file dist/process_exporter
+          test "$(lipo -archs dist/process_exporter)" = x86_64
+          otool -l dist/process_exporter | grep -A 5 LC_BUILD_VERSION
+      - name: Verify HTTP metrics
+        run: |
+          ./dist/process_exporter > "$RUNNER_TEMP/process-exporter.log" 2>&1 &
+          exporter_pid=$!
+          trap 'kill "$exporter_pid" 2>/dev/null || true' EXIT
+          curl --fail --silent --show-error --retry 10 --retry-connrefused \
+            --retry-delay 1 --max-time 20 http://127.0.0.1:9256/metrics \
+            -o "$RUNNER_TEMP/metrics.txt"
+          grep '^process_cpu_seconds_total{' "$RUNNER_TEMP/metrics.txt" > /dev/null
+          grep '^process_resident_memory_bytes{' "$RUNNER_TEMP/metrics.txt" > /dev/null
+          grep '^process_start_time_seconds{' "$RUNNER_TEMP/metrics.txt" > /dev/null
+      - name: Package binary and checksum
+        run: |
+          cp README.md dist/README.md
+          git rev-parse HEAD > dist/SOURCE_COMMIT
+          cd dist
+          tar -czf process_exporter-darwin-amd64.tar.gz process_exporter README.md SOURCE_COMMIT
+          shasum -a 256 process_exporter-darwin-amd64.tar.gz > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: process-exporter-darwin-amd64
+          path: |
+            dist/process_exporter-darwin-amd64.tar.gz
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 90
